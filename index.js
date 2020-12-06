@@ -12,17 +12,15 @@ const commas = new threeCommasAPI({
     apiSecret: apiKeySecret3Comams,
 })
 
-
-
-const args = process.argv.slice(2);
-const argSymbol = (typeof args[0] == 'undefined') ? '' : args[0].replace('symbol=', '') //забираем аргумент из консоли вида symbol=BTCUSDT
 const lenDonchian = 10 //длина канала дончана на которую смотрим
-const symbol = (argSymbol == '') ? 'BTCUSDT' : argSymbol //текущая валюта
 let equity = 1000 //текущие средства
 const sizelong = 3 //процент средств который мы кладем в одну сделку
 const interval = '4h' //интервал для баров
 const takeprofit = 3 //это процент тейк профита, который мы хотим
 
+function formatNumber(num) {
+    return Math.round(num * 100) / 100
+}
 
 function formatTime(time) {
     return new Date(time).toISOString().
@@ -71,60 +69,67 @@ function prediction(symbol, equity, sizelong, interval, takeprofit) {
         })
         .then(response => {
             const data = response
-            let position = {
-                open: false,
-                config: {
-                    /*
-                        longlimit
-                        longstop
-                        lotlong
-                        h
-                    */
-                }
-            } //open - есть ли сейчас открытая позиция, config - это собственно настройки этой позиции
-
+            let position = { }
             const donchian = chanelDonchian(data, takeprofit, equity, sizelong)
             const closeTime = new Date(data[data.length - 1].closeTime) //время закрытия последнего бара
-            console.log(closeTime)
-            
+
             if (donchian.mo) { //если выполняется условие на покупку
-                const longlimit = donchian.tpl 
-                const longstop = donchian.center 
+                const longlimit = donchian.tpl
+                const longstop = donchian.center
 
                 equity = equity - donchian.lotlong * donchian.h
 
-                position.config = {
+                position = {
+                    closeTime: closeTime,
+                    stopOrder: donchian.h,
                     longlimit: longlimit,
                     longstop: longstop,
                     lotlong: donchian.lotlong
                 }
 
-                console.log(`BUY SYMBOL ${symbol}, 
-                    выставляем стоп-ордер на ${donchian.h} (лучше выставить стоп на -0.1, а уже лимитный поставить на эту цену),
-                    берем тейк-профит ${longlimit},
-                    стоп луз ставим на ${longstop}
-                `)
+                return position
 
             } else {
-                console.log('nothing')
+                return null
             }
         })
 }
 
+commas
+    .smartTradesV2({
+        status: 'active'
+    })
+    .then(data => {
+        let array = []
+        for (let i = 0; i < data.length; i++) {
+            const st = data[i]
+            array.push({
+                id: st.id,
+                pair: st.pair,
+                status: st.status.title,
+                position: st.position.type,
+                usd_profit: formatNumber(st.profit.usd),
+                enter_price: Number(st.data.average_enter_price) //помните что эта цифра идет уже с комиссией
+            })
+        }
 
-prediction(symbol, equity, sizelong, interval, takeprofit)
+        console.table(array)
 
-/*
-- нужно ли нам иметь больше одного активного смартрейда в определнной паре?
-- смотрим на кол-во созданных смартрейдов в паре, если их больше то не создаем
-- если нашли и видим что цены примерно одинаковые то ничего не делаем, если цены разнятся больше чем на 1 то создаем смартрейд (кондишен)
-- нету своей системы выставления ордеров
-*/
+        const SYMBOLS = ['BTCUSDT', 'ETHUSDT']
 
-/*commas
-.smartTradesV2({
-    status : 'active'
-})
-.then(data => console.log(data))
-*/
+        for (let i = 0; i < SYMBOLS.length; i++) {
+            prediction(SYMBOLS[i], equity, sizelong, interval, takeprofit)
+                .then(data => {
+                    if (data == null) {
+                        console.log(`К паре ${SYMBOLS[i]} мы не нашли подходящих входов`)
+                    } else {
+                        console.log(`Выставялем смарт-трейд ${SYMBOLS[i]}, 
+                            выставляем стоп-ордер на ${data.stopOrder} (лучше выставить стоп на -0.1, а уже лимитный поставить на эту цену),
+                            берем тейк-профит ${data.longlimit},
+                            стоп луз ставим на ${data.longstop}
+                        `)
+                    }
+                })
+        }
+    })
 
